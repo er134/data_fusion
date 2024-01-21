@@ -41,7 +41,7 @@ class WaterDetection:
     def train(self, ds_train=None, ds_valid=None):
 
         if ds_train is None:
-            ds_train = WaterDataSet(self.data_path)
+            ds_train = WaterTrainDataSet(self.data_path)
         train_loader = DataLoader(ds_train, batch_size=self.batchsize,
                                   shuffle=True, num_workers=0, pin_memory=True)
         if ds_valid is not None:

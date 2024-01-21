@@ -48,8 +48,8 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
         image = self.images[index]
         data = self.data_process(image)
         assert isinstance(data, torch.Tensor)
-        label = self.labels[index] if self.labels else None
-        if label is not None:
+        label = self.labels[index] if self.labels else []
+        if isinstance(label, str):
             label = cv2.imread(label, cv2.IMREAD_GRAYSCALE)
             label = torch.tensor(label).unsqueeze(0)
         return {'data': data, 'label': label, 'name': name}
