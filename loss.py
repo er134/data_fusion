@@ -19,7 +19,7 @@ class FocalLoss(nn.Module):
             input = input.contiguous().view(-1,input.size(2))   # N,H*W,C => N*H*W,C
         target = target.view(-1,1)      
 
-        logpt = F.log_softmax(input, dim=1)
+        logpt = torch.log_softmax(input)
         logpt = logpt.gather(1,target)
         logpt = logpt.view(-1)
         pt = Variable(logpt.data.exp())
@@ -35,7 +35,7 @@ class FocalLoss(nn.Module):
         else: return loss.sum()
 
 class BCEFocalLoss(torch.nn.Module):
-    def __init__(self, gamma=2, alpha=0.25, reduction='mean'):
+    def __init__(self, gamma=2, alpha=0.07, reduction='mean'):
         super(BCEFocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha

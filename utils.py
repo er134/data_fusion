@@ -1,13 +1,16 @@
 import os
-import gc
-from typing import Optional
-import cv2
 import glob
-import numpy as np
+from typing import Optional
 from pathlib import Path
-from sklearn.metrics import confusion_matrix
+
+import cv2
 import torch
+import numpy as np
 from tqdm import tqdm
+from osgeo import gdal
+from osgeo.gdal import Dataset
+from sklearn.metrics import confusion_matrix
+
 # image suffixes
 IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp', 'pfm', 'npy'
 
@@ -74,6 +77,17 @@ class metrics():
         self.matrix = self.calculate(self.confusion_matrix)
         return {'f1': self.F1_score(), 'precision': self.precision(), 'recall': self.recall()}
 
+def cal_slope(data_path:str, output_path:str):
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    imgs = build_imglist(data_path)
+    for img in imgs:
+        img_data:Dataset = gdal.Open(img)
+        dem:Dataset = img_data.GetRasterBand(3).GetDataset()
+        dem.Set
+        name = Path(img).stem
+        options = gdal.DEMProcessingOptions
+        gdal.DEMProcessing(f'{output_path}/{name}.tif', dem, 'slope')
 
 def metrics_stats(pred_path, true_path):
 
@@ -108,3 +122,6 @@ def metrics_stats(pred_path, true_path):
 
     return results['accuracy'], results['kappa'], results['iou'], \
         results['miou'], results['precision'], results['recall']
+
+if __name__  == '__main__':
+    cal_slope('./Track1/train/images', './data/slope')

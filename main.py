@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader
 from osgeo import gdal
 from tqdm import tqdm
 
-from models import UNet, SegNext
+from models import UNet
 
-from data import WaterDataSet, WaterPredictDataSet, WaterTrainDataSet
+from data import WaterPredictDataSet, WaterTrainDataSet
 from loss import BCEFocalLoss, FocalLoss
 from utils import metrics
 
@@ -55,7 +55,7 @@ class WaterDetection:
         criterion = BCEFocalLoss()
         log_dir = os.path.join(self.save_path, "Report.csv")
         n_train = len(ds_train)
-        best_loss, best_epoch, indexes = 100, -1, metrics()
+        best_loss, best_f1, best_loss_epoch, best_f1_epoch, indexes = 100, 0, 0, -1, metrics()
         for epoch in range(1, self.epochs + 1):
             self.model.train()
             indexes.refresh()
@@ -70,7 +70,7 @@ class WaterDetection:
                         device=self.device, dtype=torch.long)
 
                     pred = self.model(imag)
-                    pred = F.sigmoid(pred)
+                    pred = torch.sigmoid(pred)
                     loss = criterion(pred, goal)
                     optimizer.zero_grad()
                     loss.backward()
@@ -85,9 +85,12 @@ class WaterDetection:
             lr_scheduler.step()
             loss_num /= n_train
             indexes_num = indexes.update()
-            precision = indexes_num['precision']
-            recall = indexes_num['recall']
-            f1 = indexes_num['f1']
+            precision = indexes_num['precision'][1]
+            recall = indexes_num['recall'][1]
+            f1 = indexes_num['f1'][1]
+            f1_all = f1
+
+            loss_all = loss_num
             print(
                 f'loss = {loss_num}, precision = {precision}, recall = {recall}, f1 = {f1}')
             if ds_valid is not None:
@@ -105,7 +108,7 @@ class WaterDetection:
                                 device=self.device, dtype=torch.long)     # dim: N*1
 
                             pred = self.model(imag)
-                            pred = F.sigmoid(pred)
+                            pred = torch.sigmoid(pred)
                             loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
@@ -119,8 +122,10 @@ class WaterDetection:
                 precision = indexes_num['precision'][1]
                 recall = indexes_num['recall'][1]
                 f1 = indexes_num['f1'][1]
+                f1_all += f1
                 print(
                     f'loss = {loss_num}, precision = {precision}, recall = {recall}, f1 = {f1}')
+                loss_all = (loss_all+loss_num)/2
 
             if epoch % 1 == 0:
                 df = pd.DataFrame([epoch, loss_num, indexes_num['f1'][1],
@@ -134,14 +139,22 @@ class WaterDetection:
                 wgt_dir = os.path.join(self.save_path, "model_epoch_")
                 if loss_num < best_loss:
                     best_loss = loss_num
-                    if os.path.exists(wgt_dir + '{}.pt'.format(best_epoch)):
-                        os.remove(wgt_dir + '{}.pt'.format(best_epoch))
+                    if os.path.exists(f'{wgt_dir}{best_loss_epoch}_loss.pt'):
+                        os.remove(f'{wgt_dir}{best_loss_epoch}_loss.pt')
                     torch.save(self.model.state_dict(),
-                               wgt_dir + '{}.pt'.format(epoch))
-                    best_epoch = epoch
+                               f'{wgt_dir}{epoch}_loss.pt')
+                    best_loss_epoch = epoch
+                    print(f'Checkpoint Epoch-{epoch} saved !')
+                if f1_all > best_f1:
+                    best_f1 = f1_all
+                    if os.path.exists(f'{wgt_dir}{best_f1_epoch}_f1.pt'):
+                        os.remove(f'{wgt_dir}{best_f1_epoch}_f1.pt')
+                    torch.save(self.model.state_dict(),
+                               f'{wgt_dir}{epoch}_f1.pt')
+                    best_f1_epoch = epoch
                     print(f'Checkpoint Epoch-{epoch} saved !')
 
-    def predict(self, batchsize=None, data_path=None):
+    def predict(self, data_process, batchsize=None, data_path=None):
         if data_path is None:
             data_path = os.path.join(self.data_path, 'val', 'images')
         save_path = os.path.join(self.save_path, 'perdict')
@@ -150,7 +163,7 @@ class WaterDetection:
             os.makedirs(save_path)
         if not os.path.exists(save_view_path):
             os.makedirs(save_view_path)
-        ds = WaterPredictDataSet(data_path)
+        ds = WaterPredictDataSet(data_path,data_process)
         data_loader = DataLoader(ds, batch_size=self.batchsize if batchsize is None else batchsize,
                                  num_workers=0, pin_memory=True)
         n_test = len(ds)
@@ -175,18 +188,4 @@ class WaterDetection:
                         cv2.imwrite(
                             f'{save_view_path}/{name_single}.png', image*255)
                     pbar.update(true_size)
-
-
-if __name__ == "__main__":
-    data_path_list = ['./Track1', #原始数据
-                      './data/npy', #原始数据的numpy格式
-                      ]
-    data_path = data_path_list[1]
-    ds_train = WaterTrainDataSet(data_path, 0, -200)
-    ds_valid = WaterTrainDataSet(data_path, -200)
-    net = UNet(2, 1)
-    net.load_state_dict(torch.load('./results/result8/model_epoch_93.pt'))
-    model = WaterDetection(data_path, './results/result10', net,
-                           batchsize=4, lr =0.001, epochs=200)
-    model.train(ds_train, ds_valid)
-    # model.predict(batchsize=1)
+    
