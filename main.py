@@ -52,7 +52,7 @@ class WaterDetection:
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
-        criterion = BCEFocalLoss()
+        criterion = FocalLoss(gamma=2, alpha=0.07)
         log_dir = os.path.join(self.save_path, "Report.csv")
         n_train = len(ds_train)
         best_loss, best_f1, best_loss_epoch, best_f1_epoch, indexes = 100, 0, 0, -1, metrics()
@@ -70,14 +70,14 @@ class WaterDetection:
                         device=self.device, dtype=torch.long)
 
                     pred = self.model(imag)
-                    pred = torch.sigmoid(pred)
+                    # pred = torch.sigmoid(pred)
                     loss = criterion(pred, goal)
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
                     true_size = imag.shape[0]
-                    pred_label = pred >= 0.5
+                    pred_label = pred.argmax(1)
                     indexes.calCM_once(
                         pred_label.cpu().numpy(), goal.cpu().numpy())
                     loss_num += loss.item() * true_size
@@ -89,7 +89,6 @@ class WaterDetection:
             recall = indexes_num['recall'][1]
             f1 = indexes_num['f1'][1]
             f1_all = f1
-
             loss_all = loss_num
             print(
                 f'loss = {loss_num}, precision = {precision}, recall = {recall}, f1 = {f1}')
@@ -108,11 +107,11 @@ class WaterDetection:
                                 device=self.device, dtype=torch.long)     # dim: N*1
 
                             pred = self.model(imag)
-                            pred = torch.sigmoid(pred)
+                            # pred = torch.sigmoid(pred)
                             loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
-                            pred_label = pred >= 0.5
+                            pred_label = pred.argmax(1)
                             indexes.calCM_once(
                                 pred_label.cpu().numpy(), goal.cpu().numpy())
                             loss_num += loss.item() * true_size
@@ -150,9 +149,13 @@ class WaterDetection:
                     if os.path.exists(f'{wgt_dir}{best_f1_epoch}_f1.pt'):
                         os.remove(f'{wgt_dir}{best_f1_epoch}_f1.pt')
                     torch.save(self.model.state_dict(),
-                               f'{wgt_dir}{epoch}_f1.pt')
+                               f'{wgt_dir}{epoch}_f1.pt')                   
                     best_f1_epoch = epoch
                     print(f'Checkpoint Epoch-{epoch} saved !')
+                if os.path.exists(f'{wgt_dir}last.pt'):
+                        os.remove(f'{wgt_dir}last.pt')
+                torch.save(self.model.state_dict(),
+                            f'{wgt_dir}last.pt')
 
     def predict(self, data_process, batchsize=None, data_path=None):
         if data_path is None:
@@ -180,12 +183,14 @@ class WaterDetection:
                     pred = F.sigmoid(pred)
 
                     true_size = imag.shape[0]
-                    pred_label = pred >= 0.5
+                    pred_label = pred >=0.05
 
-                    for image_single, name_single in zip(pred_label, name):
+                    for img_pro, image_single, name_single in zip(pred, pred_label, name):
                         image = image_single.cpu().numpy().astype(np.uint8).squeeze(0)
+                        pro = img_pro.cpu().numpy() *255
+                        pro = pro.astype(np.uint8).squeeze(0)
                         cv2.imwrite(f'{save_path}/{name_single}.png', image)
                         cv2.imwrite(
-                            f'{save_view_path}/{name_single}.png', image*255)
+                            f'{save_view_path}/{name_single}.png', pro)
                     pbar.update(true_size)
     

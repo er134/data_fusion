@@ -92,36 +92,39 @@ def cal_slope(data_path:str, output_path:str):
 def metrics_stats(pred_path, true_path):
 
     indexes = metrics()
-    pred_path = build_imglist(pred_path)
-    true_path = build_imglist(true_path)
-    assert len(pred_path) == len(true_path)
-    with tqdm(total=len(pred_path), unit='img') as pbar:
-        for i in range(len(pred_path)):
-            Pred_path = Path(pred_path[i]).stem[:-5]
-            True_path = Path(true_path[i]).stem
-
-            if Pred_path == True_path:
-                j = i
-            else:
-                is_exist = False
-                for j in range(len(true_path)):
-                    if Pred_path == Path(true_path[j]).stem:
-                        is_exist = True
-                        break
-                assert is_exist
-
-            pred = cv2.imread(pred_path[i], cv2.IMREAD_GRAYSCALE) > 0
-            true = cv2.imread(true_path[j], cv2.IMREAD_GRAYSCALE) > 0
-            # output = pred & np.logical_not(true)
-            # cv2.imwrite(rf"C:\Users\Administrator\Documents\Study\SummerCompetition\FastSAM\train11\precision\{True_path}.png",output.astype(dtype=np.uint8)*255)
-            indexes.calCM_once(pred, true)
+    pred_images = build_imglist(pred_path)
+    true_images = build_imglist(true_path)
+    assert len(pred_images) == len(true_images) 
+    with tqdm(total=len(pred_images), unit='img') as pbar:
+        for pred_image, true_image in zip(pred_images, true_images):
+            pred = cv2.imread(pred_image, cv2.IMREAD_GRAYSCALE) > 0
+            true = cv2.imread(true_image, cv2.IMREAD_GRAYSCALE) > 0
+            indexes.calCM_once(np.expand_dims(pred, 0), np.expand_dims(true,0))
             pbar.update(1)
 
     results = indexes.update()
-    print(f'Total {len(true_path)} images has been calculated.')
+    print(f'Total {len(true_images)} images has been calculated.')
 
-    return results['accuracy'], results['kappa'], results['iou'], \
-        results['miou'], results['precision'], results['recall']
+    return {'f1': results['f1'][-1], 'pr': results['precision'][-1], 're': results['recall'][-1]}
+
+def loss_stats(pred_path, true_path):
+
+    indexes = metrics()
+    pred_images = build_imglist(pred_path).sort()
+    true_images = build_imglist(true_path).sort()
+    assert len(pred_images) == len(true_images) 
+    with tqdm(total=len(pred_images), unit='img') as pbar:
+        for pred_image, true_image in zip(pred_images, true_images):
+            pred = cv2.imread(pred_image, cv2.IMREAD_GRAYSCALE) > 0
+            true = cv2.imread(true_image, cv2.IMREAD_GRAYSCALE) > 0
+            indexes.calCM_once(pred.unsqueeze(0), true.unsqueeze(0))
+            pbar.update(1)
+
+    results = indexes.update()
+    print(f'Total {len(true_images)} images has been calculated.')
+
+    return results['f1'], results['precision'], results['recall']
 
 if __name__  == '__main__':
-    cal_slope('./Track1/train/images', './data/slope')
+    r = metrics_stats(r'E:\data_fusion\results\result_sar_water_predict_1\perdict', r'E:\data_fusion\Track1\train\labels')
+    print(r)
