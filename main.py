@@ -53,7 +53,8 @@ class WaterDetection:
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
         criterion = FocalLoss(gamma=2, alpha=0.07)
-        log_dir = os.path.join(self.save_path, "Report.csv")
+        valid_log_dir = os.path.join(self.save_path, "Valid_Report.csv")
+        train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
         best_loss, best_f1, best_loss_epoch, best_f1_epoch, indexes = 100, 0, 0, -1, metrics()
         for epoch in range(1, self.epochs + 1):
@@ -92,6 +93,16 @@ class WaterDetection:
             loss_all = loss_num
             print(
                 f'loss = {loss_num}, precision = {precision}, recall = {recall}, f1 = {f1}')
+            
+            if epoch % 1 == 0:
+                df = pd.DataFrame([epoch, loss_num, indexes_num['f1'][1],
+                                   indexes_num['precision'][1], indexes_num['recall'][1]]).transpose()
+                if not os.path.exists(train_log_dir):
+                    df.to_csv(train_log_dir, mode='a', index=False, header=[
+                        'epoch', 'loss', 'f1', 'Precision', 'Recall'])
+                else:
+                    df.to_csv(train_log_dir, mode='a', index=False, header=False)
+            
             if ds_valid is not None:
                 indexes.refresh()
                 loss_num = 0
@@ -129,11 +140,11 @@ class WaterDetection:
             if epoch % 1 == 0:
                 df = pd.DataFrame([epoch, loss_num, indexes_num['f1'][1],
                                    indexes_num['precision'][1], indexes_num['recall'][1]]).transpose()
-                if not os.path.exists(log_dir):
-                    df.to_csv(log_dir, mode='a', index=False, header=[
+                if not os.path.exists(valid_log_dir):
+                    df.to_csv(valid_log_dir, mode='a', index=False, header=[
                               'epoch', 'loss', 'f1', 'Precision', 'Recall'])
                 else:
-                    df.to_csv(log_dir, mode='a', index=False, header=False)
+                    df.to_csv(valid_log_dir, mode='a', index=False, header=False)
 
                 wgt_dir = os.path.join(self.save_path, "model_epoch_")
                 if loss_num < best_loss:

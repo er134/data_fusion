@@ -37,7 +37,8 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
     self.images = ...
     self.labels = ...
     '''
-    def build_data(self) -> tuple[list[str], Optional[list[str]]]:
+    # def build_data(self) -> tuple[list[str], Optional[list[str]]]:
+    def build_data(self):
         raise NotImplementedError
 
     def __len__(self) -> int:
