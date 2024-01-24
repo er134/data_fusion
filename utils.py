@@ -75,7 +75,7 @@ class metrics():
 
     def update(self):
         self.matrix = self.calculate(self.confusion_matrix)
-        return {'f1': self.F1_score(), 'precision': self.precision(), 'recall': self.recall()}
+        return {'f1': self.F1_score()[1], 'precision': self.precision()[1], 'recall': self.recall()[1]}
 
 def cal_slope(data_path:str, output_path:str):
     if not os.path.exists(output_path):
