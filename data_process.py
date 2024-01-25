@@ -3,6 +3,7 @@ import numpy as np
 from osgeo import gdal
 from osgeo.gdal import Dataset
 import torch
+import torch.nn.functional as F
 import torchvision.transforms as tf
 from sklearn import preprocessing
 
@@ -48,3 +49,11 @@ def tif_only_opt(image_path, compose:tf.Compose):
     data = image_data[0:7, :, :]
     data = compose(torch.tensor(data, dtype=float))
     return data
+
+def npy_sar_class(image_path, category, compose:tf.Compose):
+    image_data = np.load(image_path)
+    data = image_data[(0, 1), :, :]
+    data = np.log(data+1)
+    data = compose(torch.tensor(data, dtype=float))
+    mask = torch.tensor(image_data[4, :, :]  == category)
+    return data, mask

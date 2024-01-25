@@ -51,6 +51,13 @@ class metrics():
         self.matrix = self.calculate(self.confusion_matrix)
 
     def calCM_once(self, predict, target):  # Calculate confuse matrix for a mini-batch
+        if len(predict.shape) == 3:
+            predict = predict.squeeze(0)
+            target = target.squeeze(0)
+        elif len(predict.shape) == 1:
+            cm = confusion_matrix(target, predict)
+            self.confusion_matrix += cm
+            return
         for p, t in zip(predict, target):
             p = np.int32(p.reshape(-1))
             t = np.int32(t.reshape(-1))

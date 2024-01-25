@@ -1,3 +1,4 @@
+import gc
 import os
 from pathlib import Path
 from typing import Union, Optional
@@ -39,7 +40,7 @@ class WaterDetection:
         else:
             print(f'Running Directory already exists: {self.save_path}')
 
-    def train(self, ds_train=None, ds_valid=None):
+    def train(self, update_size, ds_train=None, ds_valid=None):
 
         if ds_train is None:
             ds_train = WaterTrainDataSet(self.data_path)
@@ -53,11 +54,12 @@ class WaterDetection:
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
-        criterion = BCEFocalLoss()
+        criterion = nn.CrossEntropyLoss(reduction='none')
         valid_log_dir = os.path.join(self.save_path, "Valid_Report.csv")
         train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
         best_loss, best_f1, best_loss_epoch, best_f1_epoch, indexes = 100, 0, 0, -1, metrics()
+        size_count = 0
         for epoch in range(1, self.epochs + 1):
             self.model.train()
             indexes.refresh()
@@ -66,24 +68,35 @@ class WaterDetection:
                       unit='img') as pbar:
                 for batch in train_loader:
 
-                    imag = batch['data'].to(
+                    data, mask = batch['data']
+                    imag = data.to(
                         device=self.device, dtype=torch.float32)
                     goal = batch['label'].to(
-                        device=self.device, dtype=torch.float32)
+                        device=self.device, dtype=torch.long)
+                    
+                    mask = mask.to(device=self.device)
+                    category_count = mask.sum()
+                    true_size = imag.shape[0]
+                    if category_count == 0: continue
 
                     pred = self.model(imag)
-                    pred = torch.sigmoid(pred)
-                    loss = criterion(pred, goal)
-                    optimizer.zero_grad()
+                    # pred = torch.sigmoid(pred)
+                    loss = (criterion(pred, goal)*mask).sum() / category_count
                     loss.backward()
-                    optimizer.step()
+                    size_count += true_size
 
-                    true_size = imag.shape[0]
-                    pred_label = pred >= 0.5
+                    if size_count >= update_size:
+                        optimizer.step()
+                        optimizer.zero_grad()
+                        size_count = 0
+
+                    pred_label = pred.argmax(1)
                     indexes.calCM_once(
-                        pred_label.cpu().numpy(), goal.cpu().numpy())
+                        pred_label[mask].cpu().numpy(), goal[mask].cpu().numpy())
                     loss_num += loss.item() * true_size
                     pbar.update(true_size)
+                    torch.cuda.empty_cache()
+                    gc.collect()
             lr_scheduler.step()
             loss_num /= n_train
             indexes_num = indexes.update()
@@ -102,19 +115,24 @@ class WaterDetection:
                               unit='img') as pbar:
                         for batch in valid_loader:
 
-                            imag = batch['data'].to(
+                            data, mask = batch['data']
+                            imag = data.to(
                                 device=self.device, dtype=torch.float32)
                             goal = batch['label'].to(
-                                device=self.device, dtype=torch.float32)     # dim: N*1
+                                device=self.device, dtype=torch.long)
+                            
+                            mask = mask.to(device=self.device)
+                            category_count = mask.sum()
+                            if category_count == 0: continue
 
                             pred = self.model(imag)
-                            pred = torch.sigmoid(pred)
-                            loss = criterion(pred, goal)
+                            # pred = torch.sigmoid(pred)
+                            loss = (criterion(pred, goal)*mask).sum() / category_count
 
                             true_size = imag.shape[0]
-                            pred_label = pred >= 0.5
+                            pred_label = pred.argmax(1)
                             indexes.calCM_once(
-                                pred_label.cpu().numpy(), goal.cpu().numpy())
+                                pred_label[mask].cpu().numpy(), goal[mask].cpu().numpy())
                             loss_num += loss.item() * true_size
                             pbar.update(true_size)
                 loss_num /= n_valid
@@ -135,10 +153,10 @@ class WaterDetection:
                 if f1_all > best_f1:
                     best_f1 = f1_all
                     self.update_checkpoint(
-                        f'{wgt_dir}{best_f1_epoch}_loss.pt', f'{wgt_dir}{epoch}_loss.pt')
+                        f'{wgt_dir}{best_f1_epoch}_f1.pt', f'{wgt_dir}{epoch}_f1.pt')
                     best_f1_epoch = epoch
                 self.update_checkpoint(
-                    f'{wgt_dir}last.pt', f'{wgt_dir}last.pt')
+                    f'{wgt_dir}last.pt', f'{wgt_dir}last.pt', False)
 
     def predict(self, data_process, batchsize=None, data_path=None):
         if data_path is None:
@@ -184,8 +202,9 @@ class WaterDetection:
         else:
             df.to_csv(log_dir, mode='a', index=False, header=False)
 
-    def update_checkpoint(self, old_name, new_name, is_print):
+    def update_checkpoint(self, old_name, new_name, is_print=True):
         if os.path.exists(old_name):
             os.remove(old_name)
         torch.save(self.model.state_dict(), new_name)
-        print(f'Checkpoint {Path(new_name).stem} saved !')
+        if is_print:
+            print(f'Checkpoint {Path(new_name).stem} saved !')
