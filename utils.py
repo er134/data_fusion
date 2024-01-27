@@ -47,28 +47,24 @@ class metrics():
     def refresh(self):
         num = len(self.class_index)
         # accumulated confuse matrix, float-type
-        self.confusion_matrix = np.zeros((num, num))
-        self.matrix = self.calculate(self.confusion_matrix)
+        self.confusion_matrix = np.zeros((num, num), dtype=float)
 
     def calCM_once(self, predict, target):  # Calculate confuse matrix for a mini-batch
         if len(predict.shape) == 3:
             predict = predict.squeeze(0)
             target = target.squeeze(0)
         elif len(predict.shape) == 1:
-            cm = confusion_matrix(target, predict)
+            cm = confusion_matrix(target, predict, labels= [0, 1])
             self.confusion_matrix += cm
             return
         for p, t in zip(predict, target):
             p = np.int32(p.reshape(-1))
             t = np.int32(t.reshape(-1))
-            cm = confusion_matrix(t, p)
+            cm = confusion_matrix(t, p, labels= [0, 1])
             self.confusion_matrix += cm
 
-    def calculate(self, confusion_m):
-        FP = confusion_m.sum(axis=0) - np.diag(confusion_m)
-        FN = confusion_m.sum(axis=1) - np.diag(confusion_m)
-        TP = np.diag(confusion_m)
-        TN = confusion_m.sum() - (FP + FN + TP)
+    def calculate(self):
+        TN, FP, FN, TP = self.confusion_matrix.ravel()
         return {'TP': TP, 'FP': FP, 'TN': TN, 'FN': FN}
 
     def F1_score(self):
@@ -81,8 +77,8 @@ class metrics():
         return self.matrix['TP']/(self.matrix['TP']+self.matrix['FN']+self.eps)
 
     def update(self):
-        self.matrix = self.calculate(self.confusion_matrix)
-        return {'f1': self.F1_score()[1], 'precision': self.precision()[1], 'recall': self.recall()[1]}
+        self.matrix = self.calculate()
+        return {'f1': self.F1_score(), 'precision': self.precision(), 'recall': self.recall()}
 
 def cal_slope(data_path:str, output_path:str):
     if not os.path.exists(output_path):
@@ -106,13 +102,13 @@ def metrics_stats(pred_path, true_path):
         for pred_image, true_image in zip(pred_images, true_images):
             pred = cv2.imread(pred_image, cv2.IMREAD_GRAYSCALE) > 0
             true = cv2.imread(true_image, cv2.IMREAD_GRAYSCALE) > 0
-            indexes.calCM_once(np.expand_dims(pred, 0), np.expand_dims(true,0))
+            indexes.calCM_once(pred.ravel(), true.ravel())
             pbar.update(1)
 
     results = indexes.update()
     print(f'Total {len(true_images)} images has been calculated.')
 
-    return {'f1': results['f1'][-1], 'pr': results['precision'][-1], 're': results['recall'][-1]}
+    return {'f1': results['f1'], 'pr': results['precision'], 're': results['recall']}
 
 def loss_stats(pred_path, true_path):
 
@@ -133,5 +129,5 @@ def loss_stats(pred_path, true_path):
     return results['f1'], results['precision'], results['recall']
 
 if __name__  == '__main__':
-    r = metrics_stats(r'E:\data_fusion\results\result_sar_water_predict_1\perdict', r'E:\data_fusion\Track1\train\labels')
+    r = metrics_stats(r'./results/result_test_union/perdict', r'./data/Track1/train/labels')
     print(r)

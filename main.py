@@ -22,7 +22,7 @@ from utils import metrics
 
 
 class WaterDetection:
-    def __init__(self, data_path, save_path, model: Union[str, nn.Module], epochs=100, batchsize=8, lr=1e-3) -> None:
+    def __init__(self, data_path, save_path, model, epochs=100, batchsize=8, num_workers=0, lr=1e-3) -> None:
         self.data_path = data_path
         self.save_path = save_path
         self.device = torch.device(
@@ -30,8 +30,13 @@ class WaterDetection:
         self.epochs = epochs
         self.lr = lr
         self.batchsize = batchsize
+        self.num_workers = num_workers
         if isinstance(model, str):
             self.model = torch.load(model, map_location=self.device)
+        elif isinstance(model, dict):
+            for key in model.keys():
+                model[key] = model[key].to(device=self.device)
+            self.model = model
         else:
             self.model = model.to(device=self.device)
         if not os.path.exists(self.save_path):
@@ -40,15 +45,15 @@ class WaterDetection:
         else:
             print(f'Running Directory already exists: {self.save_path}')
 
-    def train(self, update_size, ds_train=None, ds_valid=None):
+    def train(self, ds_train=None, ds_valid=None):
 
         if ds_train is None:
             ds_train = WaterTrainDataSet(self.data_path)
         train_loader = DataLoader(ds_train, batch_size=self.batchsize,
-                                  shuffle=True, num_workers=0, pin_memory=True)
+                                  shuffle=True, num_workers=self.num_workers, pin_memory=True)
         if ds_valid is not None:
             valid_loader = DataLoader(ds_valid, batch_size=self.batchsize,
-                                      shuffle=True, num_workers=0, pin_memory=True)
+                                      shuffle=True, num_workers=self.num_workers, pin_memory=True)
             n_valid = len(ds_valid)
         optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
@@ -59,7 +64,7 @@ class WaterDetection:
         train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
         best_loss, best_f1, best_loss_epoch, best_f1_epoch, indexes = 100, 0, 0, -1, metrics()
-        size_count = 0
+        pos_weight, neg_weight = 0.5, 0.5
         for epoch in range(1, self.epochs + 1):
             self.model.train()
             indexes.refresh()
@@ -73,36 +78,43 @@ class WaterDetection:
                         device=self.device, dtype=torch.float32)
                     goal = batch['label'].to(
                         device=self.device, dtype=torch.long)
-                    
+
                     mask = mask.to(device=self.device)
                     category_count = mask.sum()
                     true_size = imag.shape[0]
-                    if category_count == 0: continue
+                    if category_count == 0:
+                        continue
+
+                    pos = mask*goal
+                    neg = mask*(goal == 0)
+                    pos_num = pos.sum()
+                    neg_num = category_count - pos_num
 
                     pred = self.model(imag)
+                    loss_pos, loss_neg = 0., 0.
                     # pred = torch.sigmoid(pred)
-                    loss = (criterion(pred, goal)*mask).sum() / category_count
+                    if pos_num > 0:
+                        loss_pos = (criterion(pred, goal)*pos).sum() / pos_num
+                    if neg_num > 0:
+                        loss_neg = (criterion(pred, goal)*neg).sum() / neg_num
+                    loss = loss_pos * pos_weight + loss_neg * neg_weight
                     loss.backward()
-                    size_count += true_size
-
-                    if size_count >= update_size:
-                        optimizer.step()
-                        optimizer.zero_grad()
-                        size_count = 0
+                    optimizer.step()
+                    optimizer.zero_grad()
 
                     pred_label = pred.argmax(1)
                     indexes.calCM_once(
                         pred_label[mask].cpu().numpy(), goal[mask].cpu().numpy())
                     loss_num += loss.item() * true_size
                     pbar.update(true_size)
-                    torch.cuda.empty_cache()
-                    gc.collect()
             lr_scheduler.step()
             loss_num /= n_train
             indexes_num = indexes.update()
             f1_all = indexes_num['f1']
             loss_all = loss_num
             print(f'loss = {loss_num}, {indexes_num}')
+            pos_weight -= 0.001
+            neg_weight += 0.001
             if epoch % 1 == 0:
                 self.save_accuracy(epoch, loss_num, indexes_num, train_log_dir)
 
@@ -120,14 +132,16 @@ class WaterDetection:
                                 device=self.device, dtype=torch.float32)
                             goal = batch['label'].to(
                                 device=self.device, dtype=torch.long)
-                            
+
                             mask = mask.to(device=self.device)
                             category_count = mask.sum()
-                            if category_count == 0: continue
+                            if category_count == 0:
+                                continue
 
                             pred = self.model(imag)
                             # pred = torch.sigmoid(pred)
-                            loss = (criterion(pred, goal)*mask).sum() / category_count
+                            loss = (criterion(pred, goal) *
+                                    mask).sum() / category_count
 
                             true_size = imag.shape[0]
                             pred_label = pred.argmax(1)
@@ -172,19 +186,39 @@ class WaterDetection:
                                  num_workers=0, pin_memory=True)
         n_test = len(ds)
         with torch.no_grad():
-            self.model.eval()
+            if isinstance(self.model, dict):
+                keys = self.model.keys()
+                for key in keys:
+                    self.model[key].eval()
+            else:
+                self.model.eval()
             with tqdm(total=n_test, desc=f'Predict Images', unit='img') as pbar:
                 for batch in data_loader:
 
-                    imag = batch['data'].to(
+                    imag, mask = batch['data']
+                    imag = imag.to(
                         device=self.device, dtype=torch.float32)
-
+                    mask = mask.to(device=self.device)
                     name = batch['name']
-                    pred = self.model(imag)
-                    pred = F.sigmoid(pred)
-
                     true_size = imag.shape[0]
-                    pred_label = pred.argmax(1)
+
+                    if isinstance(self.model, dict):
+                        b, _, h, w = imag.shape
+                        pred_label = torch.zeros(
+                            (b, h, w), 
+                            dtype=int, 
+                            device=self.device)
+                        keys = self.model.keys()
+                        for key in keys:
+                            mask_cls = mask == key
+                            pred = self.model[key](imag)
+                            mask_label = mask_cls&pred.argmax(1)
+                            pred_label ^= mask_label
+                        mask_water = mask == 80
+                        pred_label ^= mask_water
+                    elif isinstance(self.model, nn.Module):
+                        pred = self.model(imag)
+                        pred_label = pred.argmax(1)
 
                     for image_single, name_single in zip(pred_label, name):
                         image = image_single.cpu().numpy().astype(np.uint8)

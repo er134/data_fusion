@@ -57,3 +57,13 @@ def npy_sar_class(image_path, category, compose:tf.Compose):
     data = compose(torch.tensor(data, dtype=float))
     mask = torch.tensor(image_data[4, :, :]  == category)
     return data, mask
+
+def tif_sar_class(image_path, compose:tf.Compose):
+    gdal.UseExceptions()
+    image: Dataset = gdal.Open(image_path)
+    image_data = image.ReadAsArray()
+    data = image_data[(0, 1), :, :]
+    data = np.log(data+1)
+    data = compose(torch.tensor(data, dtype=float))
+    mask = torch.tensor(image_data[4, :, :])
+    return data, mask
