@@ -73,13 +73,12 @@ class WaterDetection:
                       unit='img') as pbar:
                 for batch in train_loader:
 
-                    data, mask = batch['data']
-                    imag = data.to(
+                    imag = batch['data'].to(
                         device=self.device, dtype=torch.float32)
                     goal = batch['label'].to(
                         device=self.device, dtype=torch.long)
-
-                    mask = mask.to(device=self.device)
+                    mask = batch['mask'].to(
+                        device=self.device, dtype=torch.bool)
                     category_count = mask.sum()
                     true_size = imag.shape[0]
                     if category_count == 0:
@@ -92,7 +91,7 @@ class WaterDetection:
 
                     pred = self.model(imag)
                     loss_pos, loss_neg = 0., 0.
-                    # pred = torch.sigmoid(pred)
+
                     if pos_num > 0:
                         loss_pos = (criterion(pred, goal)*pos).sum() / pos_num
                     if neg_num > 0:
@@ -127,13 +126,12 @@ class WaterDetection:
                               unit='img') as pbar:
                         for batch in valid_loader:
 
-                            data, mask = batch['data']
-                            imag = data.to(
+                            imag = batch['data'].to(
                                 device=self.device, dtype=torch.float32)
                             goal = batch['label'].to(
                                 device=self.device, dtype=torch.long)
-
-                            mask = mask.to(device=self.device)
+                            mask = batch['mask'].to(
+                                device=self.device, dtype=torch.bool)
                             category_count = mask.sum()
                             if category_count == 0:
                                 continue
@@ -194,25 +192,24 @@ class WaterDetection:
                 self.model.eval()
             with tqdm(total=n_test, desc=f'Predict Images', unit='img') as pbar:
                 for batch in data_loader:
-
-                    imag, mask = batch['data']
-                    imag = imag.to(
+                    imag = batch['data'].to(
                         device=self.device, dtype=torch.float32)
-                    mask = mask.to(device=self.device)
+                    mask = batch['mask'].to(
+                        device=self.device, dtype=torch.long)
                     name = batch['name']
                     true_size = imag.shape[0]
 
                     if isinstance(self.model, dict):
                         b, _, h, w = imag.shape
                         pred_label = torch.zeros(
-                            (b, h, w), 
-                            dtype=int, 
+                            (b, h, w),
+                            dtype=int,
                             device=self.device)
                         keys = self.model.keys()
                         for key in keys:
                             mask_cls = mask == key
                             pred = self.model[key](imag)
-                            mask_label = mask_cls&pred.argmax(1)
+                            mask_label = mask_cls & pred.argmax(1)
                             pred_label ^= mask_label
                         mask_water = mask == 80
                         pred_label ^= mask_water
