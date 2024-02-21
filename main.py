@@ -57,9 +57,9 @@ class WaterDetection:
             n_valid = len(ds_valid)
         optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
-        criterion = nn.CrossEntropyLoss(reduction='none')
+        # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
+        criterion = nn.BCELoss()
         valid_log_dir = os.path.join(self.save_path, "Valid_Report.csv")
         train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
@@ -76,37 +76,24 @@ class WaterDetection:
                     imag = batch['data'].to(
                         device=self.device, dtype=torch.float32)
                     goal = batch['label'].to(
-                        device=self.device, dtype=torch.long)
-                    mask = batch['mask'].to(
-                        device=self.device, dtype=torch.bool)
-                    category_count = mask.sum()
-                    true_size = imag.shape[0]
-                    if category_count == 0:
-                        continue
+                        device=self.device, dtype=torch.float32)
 
-                    pos = mask*goal
-                    neg = mask*(goal == 0)
-                    pos_num = pos.sum()
-                    neg_num = category_count - pos_num
-
-                    pred = self.model(imag)
-                    loss_pos, loss_neg = 0., 0.
-
-                    if pos_num > 0:
-                        loss_pos = (criterion(pred, goal)*pos).sum() / pos_num
-                    if neg_num > 0:
-                        loss_neg = (criterion(pred, goal)*neg).sum() / neg_num
-                    loss = loss_pos * pos_weight + loss_neg * neg_weight
+                    pred = self.model(imag) 
+                    pred = torch.sigmoid(pred)  
+                    pred = F.interpolate(pred, scale_factor=2, mode='nearest')     
+                  
+                    loss = criterion(pred, goal)
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
 
-                    pred_label = pred.argmax(1)
+                    true_size = imag.shape[0]
+                    pred_label = pred >= 0.5
                     indexes.calCM_once(
-                        pred_label[mask].cpu().numpy(), goal[mask].cpu().numpy())
+                        pred_label.cpu().numpy(), goal.cpu().numpy())
                     loss_num += loss.item() * true_size
                     pbar.update(true_size)
-            lr_scheduler.step()
+            # lr_scheduler.step()
             loss_num /= n_train
             indexes_num = indexes.update()
             f1_all = indexes_num['f1']
@@ -129,28 +116,24 @@ class WaterDetection:
                             imag = batch['data'].to(
                                 device=self.device, dtype=torch.float32)
                             goal = batch['label'].to(
-                                device=self.device, dtype=torch.long)
-                            mask = batch['mask'].to(
-                                device=self.device, dtype=torch.bool)
-                            category_count = mask.sum()
-                            if category_count == 0:
-                                continue
-
+                                device=self.device, dtype=torch.float32)
+                            
                             pred = self.model(imag)
-                            # pred = torch.sigmoid(pred)
-                            loss = (criterion(pred, goal) *
-                                    mask).sum() / category_count
+                            pred = torch.sigmoid(pred)
+                            pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
+
+                            loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
-                            pred_label = pred.argmax(1)
+                            pred_label = pred >= 0.5
                             indexes.calCM_once(
-                                pred_label[mask].cpu().numpy(), goal[mask].cpu().numpy())
+                                pred_label.cpu().numpy(), goal.cpu().numpy())
                             loss_num += loss.item() * true_size
                             pbar.update(true_size)
                 loss_num /= n_valid
                 indexes_num = indexes.update()
                 f1 = indexes_num['f1']
-                f1_all += f1
+                f1_all = f1
                 print(f'loss = {loss_num}, {indexes_num}')
                 loss_all = (loss_all+loss_num)/2
 
@@ -170,7 +153,7 @@ class WaterDetection:
                 self.update_checkpoint(
                     f'{wgt_dir}last.pt', f'{wgt_dir}last.pt', False)
 
-    def predict(self, data_process, batchsize=None, data_path=None):
+    def predict(self, data_process, batchsize=None, data_path=None, resize=False):
         if data_path is None:
             data_path = os.path.join(self.data_path, 'val', 'images')
         save_path = os.path.join(self.save_path, 'perdict')
@@ -179,7 +162,7 @@ class WaterDetection:
             os.makedirs(save_path)
         if not os.path.exists(save_view_path):
             os.makedirs(save_view_path)
-        ds = WaterPredictDataSet(data_path, data_process)
+        ds = WaterPredictDataSet(data_path, data_process, augment=False, resize=resize)
         data_loader = DataLoader(ds, batch_size=self.batchsize if batchsize is None else batchsize,
                                  num_workers=0, pin_memory=True)
         n_test = len(ds)
@@ -206,19 +189,32 @@ class WaterDetection:
                             dtype=int,
                             device=self.device)
                         keys = self.model.keys()
+                        mask_all = torch.zeros(
+                            (b, h, w),
+                            dtype=int,
+                            device=self.device)
                         for key in keys:
                             mask_cls = mask == key
                             pred = self.model[key](imag)
                             mask_label = mask_cls & pred.argmax(1)
-                            pred_label ^= mask_label
+                            pred_label |= mask_label
+                            mask_all |= mask_cls
+                        pred = self.model[-1](imag)
+                        mask_label = ~mask_all & pred.argmax(1)
+                        pred_label |= mask_label
                         mask_water = mask == 80
-                        pred_label ^= mask_water
+                        pred_label |= mask_water
                     elif isinstance(self.model, nn.Module):
                         pred = self.model(imag)
-                        pred_label = pred.argmax(1)
+                        pred = torch.sigmoid(pred)
+                        if resize:
+                            pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
+                        pred_label = pred >= 0.5
+                        # mask_water = mask == 80
+                        # pred_label |= mask_water
 
                     for image_single, name_single in zip(pred_label, name):
-                        image = image_single.cpu().numpy().astype(np.uint8)
+                        image = image_single.cpu().numpy().astype(np.uint8).squeeze(0)
                         cv2.imwrite(f'{save_path}/{name_single}.png', image)
                         cv2.imwrite(
                             f'{save_view_path}/{name_single}.png', image*255)

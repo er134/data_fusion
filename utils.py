@@ -50,18 +50,10 @@ class metrics():
         self.confusion_matrix = np.zeros((num, num), dtype=float)
 
     def calCM_once(self, predict, target):  # Calculate confuse matrix for a mini-batch
-        if len(predict.shape) == 3:
-            predict = predict.squeeze(0)
-            target = target.squeeze(0)
-        elif len(predict.shape) == 1:
-            cm = confusion_matrix(target, predict, labels= [0, 1])
-            self.confusion_matrix += cm
-            return
-        for p, t in zip(predict, target):
-            p = np.int32(p.reshape(-1))
-            t = np.int32(t.reshape(-1))
-            cm = confusion_matrix(t, p, labels= [0, 1])
-            self.confusion_matrix += cm
+        t = target.ravel()
+        p = predict.ravel()
+        cm = confusion_matrix(t, p, labels= [0, 1])
+        self.confusion_matrix += cm
 
     def calculate(self):
         TN, FP, FN, TP = self.confusion_matrix.ravel()
@@ -95,8 +87,8 @@ def cal_slope(data_path:str, output_path:str):
 def metrics_stats(pred_path, true_path):
 
     indexes = metrics()
-    pred_images = build_imglist(pred_path)
-    true_images = build_imglist(true_path)
+    pred_images = build_imglist(pred_path)[-200:]
+    true_images = build_imglist(true_path)[-200:]
     assert len(pred_images) == len(true_images) 
     with tqdm(total=len(pred_images), unit='img') as pbar:
         for pred_image, true_image in zip(pred_images, true_images):
@@ -129,5 +121,5 @@ def loss_stats(pred_path, true_path):
     return results['f1'], results['precision'], results['recall']
 
 if __name__  == '__main__':
-    r = metrics_stats(r'./results/result_test_union/perdict', r'./data/Track1/train/labels')
+    r = metrics_stats(r'results/result_resize256_aug_2/perdict', r'./data/npy/train/labels')
     print(r)
