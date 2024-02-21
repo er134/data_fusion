@@ -51,3 +51,39 @@ class BCEFocalLoss(torch.nn.Module):
         elif self.reduction == 'sum':
             loss = torch.sum(loss)
         return loss
+    
+class ModifiedOhemLoss(nn.Module): # only available for binary-classification
+
+    def __init__(self, thresh=1.0, min_kept=256): # OHEM ≈ BCE when thresh = 1.0
+        super(ModifiedOhemLoss, self).__init__()
+        self.thresh = float(thresh)
+        self.min_kept = int(min_kept)
+        self.criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, pred, target, valid_mask=None):
+        pred = pred.view(-1)
+        target = target.view(-1)
+        if valid_mask is None:
+            valid_mask = torch.ones_like(pred)
+        else:
+            valid_mask = valid_mask.view(-1)
+        pos_mask = (target.ne(0) * valid_mask).bool()    # True for positive sample
+        neg_mask = (target.eq(0) * valid_mask).bool()    # True for negative sample
+        neg_prob = 1 - torch.sigmoid(pred)               # (1-p) for negative probs
+        neg_prob = neg_prob.masked_fill_(~neg_mask, 1)
+
+        num_valid = min(self.min_kept, neg_mask.sum())
+        if num_valid > 0:
+            index = neg_prob.argsort()  # probs from small to large
+            thres_index = index[num_valid - 1]
+            if neg_prob[thres_index] > self.thresh:
+                threshold = neg_prob[thres_index]
+            else:
+                threshold = self.thresh
+            kept_mask = neg_prob.le(threshold).long() + pos_mask.long()
+        else:
+            kept_mask = pos_mask.long()
+
+        numb = kept_mask.sum()
+        loss = self.criterion(pred, target) * kept_mask
+        return loss.sum(), numb

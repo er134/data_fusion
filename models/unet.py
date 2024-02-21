@@ -76,7 +76,7 @@ class OutConv(nn.Module):
 
 class UNet(nn.Module):
     
-    def __init__(self, n_channels, n_classes, dimension=64, bilinear=True):
+    def __init__(self, n_channels, n_classes, dimension=64, bilinear=True, multi_head=False):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -92,7 +92,8 @@ class UNet(nn.Module):
         self.up2 = Up(dimension * 8, (dimension * 4) // factor, bilinear)
         self.up3 = Up(dimension * 4, (dimension * 2) // factor, bilinear)
         self.up4 = Up(dimension * 2, dimension, bilinear)
-        self.outc = OutConv(dimension, n_classes)
+        self.outc = MultiHead(dimension, n_classes) if multi_head \
+            else OutConv(dimension, n_classes)
 
     def forward(self, x):
         x1 = self.inc(x)
@@ -106,6 +107,36 @@ class UNet(nn.Module):
         x = self.up4(x, x1)
         logits = self.outc(x)
         return logits
+
+class SingleHead(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(SingleHead, self).__init__()
+        self.head = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels // 2, kernel_size=1),
+            nn.BatchNorm2d(in_channels // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels // 2, out_channels, kernel_size=1))
+
+    def forward(self, x):
+        return self.head(x)
+
+class MultiHead(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(MultiHead, self).__init__()
+        self.head1 = SingleHead(in_channels, out_channels)
+        self.head2 = SingleHead(in_channels, out_channels)
+        self.head3 = SingleHead(in_channels, out_channels)
+        self.head4 = SingleHead(in_channels, out_channels)
+        self.head5 = SingleHead(in_channels, out_channels)
+
+    def forward(self, x):
+        y1 = self.head1(x) # pos10
+        y2 = self.head2(x) # neg10
+        y3 = self.head3(x) # pos40
+        y4 = self.head4(x) # neg40
+        y5 = self.head5(x) # others, except water (lulc=80)
+        return y1, y2, y3, y4, y5
+
 
 ##############################################################################
 if __name__ == "__main__":

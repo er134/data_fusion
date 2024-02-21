@@ -17,7 +17,7 @@ from tqdm import tqdm
 from models import UNet
 
 from data import WaterPredictDataSet, WaterTrainDataSet
-from loss import BCEFocalLoss, FocalLoss
+from loss import BCEFocalLoss, FocalLoss, ModifiedOhemLoss
 from utils import metrics
 
 
@@ -59,7 +59,7 @@ class WaterDetection:
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
         # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         #     optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
-        criterion = nn.BCELoss()
+        criterion = ModifiedOhemLoss()
         valid_log_dir = os.path.join(self.save_path, "Valid_Report.csv")
         train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
@@ -77,12 +77,25 @@ class WaterDetection:
                         device=self.device, dtype=torch.float32)
                     goal = batch['label'].to(
                         device=self.device, dtype=torch.float32)
-
+                    mask = batch['mask'].to(
+                        device=self.device, dtype=torch.float32)
+                    
                     pred = self.model(imag) 
                     pred = torch.sigmoid(pred)  
-                    pred = F.interpolate(pred, scale_factor=2, mode='nearest')     
-                  
-                    loss = criterion(pred, goal)
+                    if isinstance(pred, tuple):
+                        for i, item in enumerate(pred):
+                            pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                        keys = [10, 30, 40, 90]
+                        mask_all = torch.zeros_like(goal)
+                        loss = 0.
+                        for i, key in enumerate(keys):
+                            mask_cls = mask == key
+                            loss += criterion(pred[i], goal, mask_cls)
+                            mask_all |= mask_cls
+                        loss += criterion(pred[4], goal, ~mask_all)
+                    else:
+                        pred = F.interpolate(pred, scale_factor=2, mode='nearest')     
+                        loss = criterion(pred, goal)
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
@@ -120,9 +133,13 @@ class WaterDetection:
                             
                             pred = self.model(imag)
                             pred = torch.sigmoid(pred)
-                            pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
-
-                            loss = criterion(pred, goal)
+                            if isinstance(pred, tuple):
+                                for i, item in enumerate(pred):
+                                    pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                                
+                                loss = criterion(pred, goal)
+                            else:
+                                pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
 
                             true_size = imag.shape[0]
                             pred_label = pred >= 0.5
@@ -210,8 +227,8 @@ class WaterDetection:
                         if resize:
                             pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
                         pred_label = pred >= 0.5
-                        # mask_water = mask == 80
-                        # pred_label |= mask_water
+                        mask_water = mask == 80
+                        pred_label |= mask_water
 
                     for image_single, name_single in zip(pred_label, name):
                         image = image_single.cpu().numpy().astype(np.uint8).squeeze(0)
