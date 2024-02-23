@@ -76,7 +76,7 @@ class OutConv(nn.Module):
 
 class UNet(nn.Module):
     
-    def __init__(self, n_channels, n_classes, dimension=64, bilinear=True, multi_head=False):
+    def __init__(self, n_channels, n_classes, dimension=64, bilinear=True, multi_head=False, add_layer=False):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -107,6 +107,19 @@ class UNet(nn.Module):
         x = self.up4(x, x1)
         logits = self.outc(x)
         return logits
+
+class DeepDown(nn.Module):
+    def __init__(self, dimension, bilinear) -> None:
+        super(DeepDown, self).__init__()
+        factor = 2 if bilinear else 1
+        self.down4 = Down(dimension * 8, dimension * 16)
+        self.down5 = Down(dimension * 16, (dimension * 32) // factor)
+        self.up0 = Up(dimension * 32, (dimension * 16) // factor, bilinear)
+    def forward(self, x):
+        x1 = self.down4(x)
+        x2 = self.down5(x1)
+        x3 = self.up0(x2, x1)
+        return x3
 
 class SingleHead(nn.Module):
     def __init__(self, in_channels, out_channels):

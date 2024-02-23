@@ -45,7 +45,7 @@ class WaterDetection:
         else:
             print(f'Running Directory already exists: {self.save_path}')
 
-    def train(self, ds_train=None, ds_valid=None):
+    def train(self, ds_train=None, ds_valid=None, resize = True):
 
         if ds_train is None:
             ds_train = WaterTrainDataSet(self.data_path)
@@ -59,7 +59,7 @@ class WaterDetection:
             self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
         # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         #     optimizer, T_max=self.epochs, eta_min=0, last_epoch=-1)
-        criterion = ModifiedOhemLoss()
+        criterion = nn.BCELoss()
         valid_log_dir = os.path.join(self.save_path, "Valid_Report.csv")
         train_log_dir = os.path.join(self.save_path, "Train_Report.csv")
         n_train = len(ds_train)
@@ -83,8 +83,9 @@ class WaterDetection:
                     pred = self.model(imag) 
                     pred = torch.sigmoid(pred)  
                     if isinstance(pred, tuple):
-                        for i, item in enumerate(pred):
-                            pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                        if resize:
+                            for i, item in enumerate(pred):
+                                pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
                         keys = [10, 30, 40, 90]
                         mask_all = torch.zeros_like(goal)
                         loss = 0.
@@ -94,7 +95,9 @@ class WaterDetection:
                             mask_all |= mask_cls
                         loss += criterion(pred[4], goal, ~mask_all)
                     else:
-                        pred = F.interpolate(pred, scale_factor=2, mode='nearest')     
+                        
+                        if resize:
+                            pred = F.interpolate(pred, scale_factor=2, mode='nearest')     
                         loss = criterion(pred, goal)
                     loss.backward()
                     optimizer.step()
@@ -139,8 +142,9 @@ class WaterDetection:
                                 
                                 loss = criterion(pred, goal)
                             else:
-                                pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
-
+                                if resize:
+                                    pred = F.interpolate(pred, scale_factor=2, mode='nearest') 
+                                loss = criterion(pred, goal)
                             true_size = imag.shape[0]
                             pred_label = pred >= 0.5
                             indexes.calCM_once(
