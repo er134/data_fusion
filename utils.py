@@ -121,5 +121,5 @@ def loss_stats(pred_path, true_path):
     return results['f1'], results['precision'], results['recall']
 
 if __name__  == '__main__':
-    r = metrics_stats(r'results/result_sar_class_rs256_bs4_deep/perdict', r'./data/npy/train/labels')
+    r = metrics_stats(r'results/result_resize256_aug_2/perdict', r'./data/npy/train/labels')
     print(r)

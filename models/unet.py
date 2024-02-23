@@ -148,7 +148,7 @@ class MultiHead(nn.Module):
         y3 = self.head3(x) # pos40
         y4 = self.head4(x) # neg40
         y5 = self.head5(x) # others, except water (lulc=80)
-        return y1, y2, y3, y4, y5
+        return [y1, y2, y3, y4, y5]
 
 
 ##############################################################################
