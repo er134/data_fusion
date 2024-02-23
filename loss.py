@@ -58,7 +58,7 @@ class ModifiedOhemLoss(nn.Module): # only available for binary-classification
         super(ModifiedOhemLoss, self).__init__()
         self.thresh = float(thresh)
         self.min_kept = int(min_kept)
-        self.criterion = torch.nn.BCEWithLogitsLoss(reduction='none')
+        self.criterion = torch.nn.BCELoss(reduction='none')
 
     def forward(self, pred, target, valid_mask=None):
         pred = pred.view(-1)
@@ -84,6 +84,5 @@ class ModifiedOhemLoss(nn.Module): # only available for binary-classification
         else:
             kept_mask = pos_mask.long()
 
-        numb = kept_mask.sum()
         loss = self.criterion(pred, target) * kept_mask
-        return loss.sum(), numb
+        return loss.mean()
