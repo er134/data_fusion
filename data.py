@@ -59,7 +59,7 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
             label = cv2.imread(label, cv2.IMREAD_GRAYSCALE)
             label = torch.tensor(label).unsqueeze(0)
         if self.augment:
-            p1, p2, p3, p4 = 0.5, 0.5, 0.5, 0.
+            p1, p2, p3, p4 = 0.5, 0.5, 0.5, 0.5
             shape = label.shape[-1]
             if torch.rand(1) < p1:
                 data = F.hflip(data)

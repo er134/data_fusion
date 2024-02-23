@@ -50,8 +50,8 @@ class metrics():
         self.confusion_matrix = np.zeros((num, num), dtype=float)
 
     def calCM_once(self, predict, target):  # Calculate confuse matrix for a mini-batch
-        t = target.ravel()
-        p = predict.ravel()
+        t = target.flatten()
+        p = predict.flatten()
         cm = confusion_matrix(t, p, labels= [0, 1])
         self.confusion_matrix += cm
 
@@ -120,6 +120,53 @@ def loss_stats(pred_path, true_path):
 
     return results['f1'], results['precision'], results['recall']
 
+def CutMix(image, label, mask, alpha=1.0):
+    """
+    inputs:
+        image: batch of input images, shape (N, C, H, W)
+        dem: batch of input dem data, shape (N, H, W)
+        ...
+        target: batch of target images, shape (N, H, W)
+        alpha: regularization hyperparameter
+    outputs:
+        image: batch of mixed input images, shape (N, C, H, W)
+        dem: batch of mixed input dem data, shape (N, H, W)
+        ...
+        target: batch of mixed target images, shape (N, H, W)
+        lam: Mixing ratio
+    """
+    indices = torch.randperm(image.size(0))
+    shuffled_image = image[indices]
+    shuffled_label = label[indices]
+    shuffled_mask = mask[indices]
+
+    lam = np.random.beta(alpha, alpha)
+    lam = max(lam, 1 - lam)
+    bbx1, bby1, bbx2, bby2 = rand_bbox(image.size(), lam)
+
+    image[:, :, bbx1:bbx2, bby1:bby2] = shuffled_image[:, :, bbx1:bbx2, bby1:bby2]
+    label[:, bbx1:bbx2, bby1:bby2] = shuffled_label[:, bbx1:bbx2, bby1:bby2]
+    mask[:, bbx1:bbx2, bby1:bby2] = shuffled_mask[:, bbx1:bbx2, bby1:bby2]
+
+    # Adjust lambda to exactly match pixel ratio
+    lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (image.size()[-1] * image.size()[-2]))
+
+def rand_bbox(size, lam):
+    W, H = size[2], size[3]
+    cut_rat = np.sqrt(1. - lam)
+
+    cut_w = np.int_(W * cut_rat)
+    cut_h = np.int_(H * cut_rat)
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2
+
 if __name__  == '__main__':
-    r = metrics_stats(r'results/result_resize256_aug_2/perdict', r'./data/npy/train/labels')
+    r = metrics_stats(r'./results/result_resize256_aug_crop_0.4_5e5/perdict', r'./data/npy/train/labels')
     print(r)
