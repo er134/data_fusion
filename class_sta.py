@@ -20,7 +20,7 @@ std = [1.00755637, 0.98871325, 1.8027]#, 17.93172077]
 compose = tf.Compose([tf.Normalize(mean, std, inplace=True)])
 dp = lambda image:npy_sar_class(image, compose)
 imgs = build_imglist('/home/er134/data_fusion/results/resize256_aug_sdwi_multihead_10/perdict')
-ds_valid = WaterTrainDataSet(data_path, dp, 0, -200, augment=False, resize=True)
+ds_valid = WaterTrainDataSet(data_path, dp, -200, augment=False, resize=True)
 
 me = metrics()
 num = 0
@@ -30,7 +30,7 @@ for i, data in enumerate(ds_valid):
     name = data['name']
     mask_cls = mask == 40#~((mask == 10) | (mask == 30) | (mask == 40) | (mask == 90))
     num += np.count_nonzero(mask_cls)
-    img = cv2.imread(imgs[i], cv2.IMREAD_GRAYSCALE)
+    img = cv2.imread(imgs[i + 1431], cv2.IMREAD_GRAYSCALE)
     me.calCM_once(img[mask_cls], label[mask_cls])
 print(me.update())
 print(f'num: {num}')

@@ -38,7 +38,8 @@ class SemiWaterDetection(WaterDetection):
         for epoch in range(1, self.epochs + 1):
             self.model.train()
             indexes.refresh()
-            loss_num = 0.
+            loss_num = 0.            
+
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{self.epochs}:train',
                       unit='img') as pbar:
                 for batch in train_loader:
@@ -113,7 +114,7 @@ class SemiWaterDetection(WaterDetection):
                             pred = self.model(imag)
 
                             certain_mask = goal <= 1
-                            certain_mask = certain_mask.view(-1)
+                            certain_mask_view = certain_mask.view(-1)
                             goal[goal>1] = 1
                             pred_label = torch.zeros_like(goal, dtype=int)
                             if isinstance(pred, list):
@@ -126,23 +127,35 @@ class SemiWaterDetection(WaterDetection):
                                 for i, key in enumerate(keys):
                                     mask_cls = mask == key
                                     mask_cls = mask_cls.unsqueeze(1)
-                                    loss += (criterion(pred[i], goal, mask_cls) * certain_mask).mean()
-                                    pred_label |= ((pred[i] >= 0.5) & mask_cls)
+                                    loss += (criterion(pred[i], goal, mask_cls) * certain_mask_view).mean()
+                                    pred_label |= ((pred[i] >= 0.9) & mask_cls)
                                     mask_all |= mask_cls
                                 mask_all.unsqueeze(1)
-                                loss += (criterion(pred[4], goal, mask_cls) * certain_mask).mean()
-                                pred_label |= ((pred[4] >= 0.5) & ~mask_all)
+                                loss += (criterion(pred[4], goal, mask_cls) * certain_mask_view).mean()
+                                pred_label |= ((pred[4] >= 0.9) & ~mask_all)
                             else:
                                 pred = torch.sigmoid(pred)
                                 pred = F.interpolate(pred, scale_factor=2, mode='nearest')
-                                pred_label = pred >= 0.5
+                                pred_label = pred >= 0.9
                                 loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
                             indexes.calCM_once(
-                                pred_label.cpu().numpy(), goal.cpu().numpy())
+                                pred_label[certain_mask].cpu().numpy(), goal[certain_mask].cpu().numpy())
                             loss_num += loss.item() * true_size
                             pbar.update(true_size)
+
+                if epoch % 30 == 0 and epoch <= 300:
+                    self.semi_predict(dataset=ds_valid, resize=True, thres=0.9, save_path='./temp')
+                    print('updated train dataloader')
+                    ds_valid.labels = build_imglist('./temp')
+                    self.model.outc = MultiHead(64, 1)
+                    train_loader = DataLoader(ds_train + ds_valid, batch_size=self.batchsize,
+                                    shuffle=True, num_workers=self.num_workers, pin_memory=True)
+                    optimizer = torch.optim.AdamW(
+                        self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
+                    optimizer.zero_grad()
+                    n_train = len(ds_train) + len(ds_valid)
                 loss_num /= n_valid
                 indexes_num = indexes.update()
                 f1 = indexes_num['f1']
@@ -150,21 +163,6 @@ class SemiWaterDetection(WaterDetection):
                 print(f'loss = {loss_num}, {indexes_num}')
                 loss_all = (loss_all+loss_num)/2
 
-            if epoch % 20 == 0 and epoch <= 100:
-                self.semi_predict(dataset=ds_valid, resize=True, thres=0.9, save_path='./temp')
-                print('updated train dataloader')
-                ds_valid.labels = build_imglist('./temp')
-                net1 = UNet(3, 1)
-                net1.outc = MultiHead(64, 1)
-                net1.load_state_dict(torch.load("results/resize256_aug_sdwi_multihead_1/model_epoch_324_f1.pt"))
-                net1.outc = MultiHead(64, 1)
-                self.model = net1.to(self.device)
-                train_loader = DataLoader(ds_train + ds_valid, batch_size=self.batchsize,
-                                  shuffle=True, num_workers=self.num_workers, pin_memory=True)
-                optimizer = torch.optim.AdamW(
-                    self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
-                optimizer.zero_grad()
-                n_train = len(ds_train) + len(ds_valid)
 
             if epoch % 1 == 0:
                 self.save_accuracy(epoch, loss_num, indexes_num, valid_log_dir)
@@ -216,21 +214,21 @@ class SemiWaterDetection(WaterDetection):
                             pos = ((pred[i] >= thres) & mask_cls)
                             neg = ((pred[i] <= (1-thres)) & mask_cls)
                             uncer = ((~pos) & (~neg) & mask_cls)
-                            pred_label[pos] == 1
-                            pred_label[neg] == 0
+                            pred_label[pos] = 1
+                            pred_label[neg] = 0
                             pred_label[uncer] = 2
                             mask_all |= mask_cls
-                        pos = ((pred[i] >= thres) & ~mask_all)
-                        neg = ((pred[i] <= (1-thres)) & ~mask_all)
+                        pos = ((pred[4] >= thres) & ~mask_all)
+                        neg = ((pred[4] <= (1-thres)) & ~mask_all)
                         uncer = ((~pos) & (~neg) & ~mask_all)
-                        pred_label[pos] == 1
-                        pred_label[neg] == 0
+                        pred_label[pos] = 1
+                        pred_label[neg] = 0
                         pred_label[uncer] = 2
                     else:
                         pred = torch.sigmoid(pred)
                         if resize:
                             pred = F.interpolate(pred, scale_factor=2, mode='bilinear')
-                        pred_label = pred >= 0.5
+                        pred_label = pred >= thres
 
 
                     for image_single, name_single in zip(pred_label, name):

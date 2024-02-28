@@ -271,7 +271,7 @@ class WaterDetection:
                                 item = torch.sigmoid(item)
                                 pred[i] = F.interpolate(item, scale_factor=2, mode='bilinear', antialias=True)
                             keys = [10, 30, 40, 90]
-                            thres = [0.5, 0.45, 0.5, 0.5]
+                            thres = [0.9, 0.9, 0.9, 0.9]
                             mask_all = torch.zeros_like(pred[0], dtype=int)
                             pred_label = torch.zeros_like(pred[0], dtype=int)
                             for i, key in enumerate(keys):
@@ -279,14 +279,14 @@ class WaterDetection:
                                 mask_cls = mask_cls.unsqueeze(1)
                                 pred_label |= ((pred[i] >= thres[i]) & mask_cls)
                                 mask_all |= mask_cls
-                            pred_label |= ((pred[4] >= 0.5) & ~mask_all)
+                            pred_label |= ((pred[4] >= 0.9) & ~mask_all)
                         else:
                             pred = torch.sigmoid(pred)
                             if resize:
                                 pred = F.interpolate(pred, scale_factor=2, mode='bilinear')
                             pred_label = pred >= 0.5
-                        mask_water = mask == 80
-                        pred_label |= mask_water
+                        # mask_water = mask == 80
+                        # pred_label |= mask_water
 
                     for image_single, name_single in zip(pred_label, name):
                         image = image_single.cpu().numpy().astype(np.uint8).squeeze(0)

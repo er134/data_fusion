@@ -19,7 +19,6 @@ def npy_sar_class(image_path, compose:tf.Compose):
     data = np.concatenate((data, sdwi), axis=0)
     data = compose(torch.tensor(data, dtype=float))
     mask = torch.tensor(image_data[4, :, :])
-    mask *= image_data[5, :, :]<=50
     return data, mask
 
 def tif_sar_class(image_path, compose:tf.Compose):

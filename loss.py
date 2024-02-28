@@ -70,7 +70,7 @@ class ModifiedOhemLoss(nn.Module): # only available for binary-classification
         pos_mask = (target.ne(0) * valid_mask).bool()    # True for positive sample
         neg_mask = (target.eq(0) * valid_mask).bool()    # True for negative sample
         neg_prob = 1 - torch.sigmoid(pred)               # (1-p) for negative probs
-        neg_prob = neg_prob.masked_fill_(~neg_mask, 1)
+        neg_prob = neg_prob.masked_fill_(~neg_mask, 1.1)
 
         num_valid = min(self.min_kept, neg_mask.sum())
         if num_valid > 0:
