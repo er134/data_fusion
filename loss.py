@@ -85,4 +85,4 @@ class ModifiedOhemLoss(nn.Module): # only available for binary-classification
             kept_mask = pos_mask.long()
 
         loss = self.criterion(pred, target) * kept_mask
-        return loss.mean()
+        return loss

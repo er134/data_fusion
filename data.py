@@ -4,6 +4,7 @@ from typing import Optional, Callable
 
 import cv2
 import numpy as np
+from torch.utils.data.dataset import ConcatDataset, Dataset
 import torchvision.transforms as tf
 import torchvision.transforms.functional as F
 from torch import torch
@@ -29,7 +30,7 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
         super(WaterBaseDataSet, self).__init__()
         self.data_path = data_path
         self.images, self.labels = self.build_data()
-        right = len(self.images) if right is None else right
+        right = len(self.images) if right is None else right 
         self.images = self.images[left:right]
         if self.labels is not None: 
             self.labels = self.labels[left:right]
@@ -45,7 +46,7 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
     # def build_data(self) -> tuple[list[str], Optional[list[str]]]:
     def build_data(self):
         raise NotImplementedError
-
+    
     def __len__(self) -> int:
         return len(self.images)
 
@@ -59,7 +60,7 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
             label = cv2.imread(label, cv2.IMREAD_GRAYSCALE)
             label = torch.tensor(label).unsqueeze(0)
         if self.augment:
-            p1, p2, p3, p4 = 0.5, 0.5, 0.5, 0.5
+            p1, p2, p3, p4 = 0.5, 0.5, 0.5, 0
             shape = label.shape[-1]
             if torch.rand(1) < p1:
                 data = F.hflip(data)
@@ -98,3 +99,7 @@ class WaterPredictDataSet(WaterBaseDataSet):
     def build_data(self):
         images = build_imglist(self.data_path)
         return (images, None)
+    
+class WaterSemiDataSet(WaterBaseDataSet):
+    def build_data(self):
+        return ([], None)
