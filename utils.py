@@ -168,5 +168,5 @@ def rand_bbox(size, lam):
     return bbx1, bby1, bbx2, bby2
 
 if __name__  == '__main__':
-    r = metrics_stats(r'./results/resize256_aug_sdwi_multihead_1/perdict', r'./data/npy/train/labels')
+    r = metrics_stats(r'./results/resize256_aug_sdwi_multihead_semi_1/perdict', r'./data/npy/train/labels')
     print(r)

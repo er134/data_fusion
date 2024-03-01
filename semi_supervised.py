@@ -39,7 +39,7 @@ class SemiWaterDetection(WaterDetection):
             self.model.train()
             indexes.refresh()
             loss_num = 0.            
-
+            img_num = 0
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{self.epochs}:train',
                       unit='img') as pbar:
                 for batch in train_loader:
@@ -71,7 +71,7 @@ class SemiWaterDetection(WaterDetection):
                             pred_label |= ((pred[i] >= 0.5) & mask_cls)
                             mask_all |= mask_cls
                         mask_all.unsqueeze(1)
-                        loss += (criterion(pred[4], goal, mask_cls) * certain_mask).mean()
+                        loss += (criterion(pred[4], goal, ~mask_all) * certain_mask).mean()
                         pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                     else:
                         pred = torch.sigmoid(pred)
@@ -83,8 +83,10 @@ class SemiWaterDetection(WaterDetection):
                     optimizer.zero_grad()
 
                     true_size = imag.shape[0]
-                    indexes.calCM_once(
-                        pred_label.cpu().numpy(), goal.cpu().numpy())
+                    img_num += true_size
+                    if img_num <= n_train:
+                        indexes.calCM_once(
+                            pred_label.cpu().numpy(), goal.cpu().numpy())
                     loss_num += loss.item() * true_size
                     pbar.update(true_size)
             loss_num /= n_train
@@ -114,7 +116,6 @@ class SemiWaterDetection(WaterDetection):
                             pred = self.model(imag)
 
                             certain_mask = goal <= 1
-                            certain_mask_view = certain_mask.view(-1)
                             goal[goal>1] = 1
                             pred_label = torch.zeros_like(goal, dtype=int)
                             if isinstance(pred, list):
@@ -127,46 +128,49 @@ class SemiWaterDetection(WaterDetection):
                                 for i, key in enumerate(keys):
                                     mask_cls = mask == key
                                     mask_cls = mask_cls.unsqueeze(1)
-                                    loss += (criterion(pred[i], goal, mask_cls) * certain_mask_view).mean()
-                                    pred_label |= ((pred[i] >= 0.9) & mask_cls)
+                                    loss += (criterion(pred[i], goal, mask_cls) * certain_mask).mean()
+                                    pred_label |= ((pred[i] >= 0.5) & mask_cls)
                                     mask_all |= mask_cls
                                 mask_all.unsqueeze(1)
-                                loss += (criterion(pred[4], goal, mask_cls) * certain_mask_view).mean()
-                                pred_label |= ((pred[4] >= 0.9) & ~mask_all)
+                                loss += (criterion(pred[4], goal, ~mask_all) * certain_mask).mean()
+                                pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                             else:
                                 pred = torch.sigmoid(pred)
                                 pred = F.interpolate(pred, scale_factor=2, mode='nearest')
-                                pred_label = pred >= 0.9
+                                pred_label = pred >= 0.5
                                 loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
                             indexes.calCM_once(
-                                pred_label[certain_mask].cpu().numpy(), goal[certain_mask].cpu().numpy())
+                                pred_label.cpu().numpy(), goal.cpu().numpy())
                             loss_num += loss.item() * true_size
                             pbar.update(true_size)
+            loss_num /= n_valid
+            indexes_num = indexes.update()
+            f1 = indexes_num['f1']
+            f1_all = f1
+            print(f'loss = {loss_num}, {indexes_num}')
+            loss_all = (loss_all+loss_num)/2
 
-                if epoch % 30 == 0 and epoch <= 300:
-                    self.semi_predict(dataset=ds_valid, resize=True, thres=0.9, save_path='./temp')
-                    print('updated train dataloader')
-                    ds_valid.labels = build_imglist('./temp')
-                    self.model.outc = MultiHead(64, 1)
-                    train_loader = DataLoader(ds_train + ds_valid, batch_size=self.batchsize,
-                                    shuffle=True, num_workers=self.num_workers, pin_memory=True)
-                    optimizer = torch.optim.AdamW(
-                        self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
-                    optimizer.zero_grad()
-                    n_train = len(ds_train) + len(ds_valid)
-                loss_num /= n_valid
-                indexes_num = indexes.update()
-                f1 = indexes_num['f1']
-                f1_all = f1
-                print(f'loss = {loss_num}, {indexes_num}')
-                loss_all = (loss_all+loss_num)/2
+            wgt_dir = os.path.join(self.save_path, "model_epoch_")
 
+            if epoch % 50 == 2 and epoch <= 302:
+                self.semi_predict(dataset=ds_valid, resize=True, thres=0.9, save_path='./temp')
+                print('updated train dataloader')
+                ds_valid.labels = build_imglist('./temp')
+                self.model = UNet(3, 1, 64, multi_head=True)
+                self.model.load_state_dict(torch.load(f'{wgt_dir}{best_f1_epoch}_f1.pt'))
+                self.model.to(device=self.device)
+                self.model.outc = MultiHead(64, 1).to(device=self.device)
+                train_loader = DataLoader(ds_train + ds_valid, batch_size=self.batchsize,
+                                shuffle=True, num_workers=self.num_workers, pin_memory=True)
+                optimizer = torch.optim.AdamW(
+                    self.model.parameters(), lr=self.lr, betas=(0.5, 0.999))
+                optimizer.zero_grad()
+                n_train = len(ds_train) + len(ds_valid)
 
             if epoch % 1 == 0:
                 self.save_accuracy(epoch, loss_num, indexes_num, valid_log_dir)
-                wgt_dir = os.path.join(self.save_path, "model_epoch_")
                 if loss_num < best_loss:
                     best_loss = loss_num
                     self.update_checkpoint(
