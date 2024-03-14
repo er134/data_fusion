@@ -18,7 +18,7 @@ from tqdm import tqdm
 from models import UNet
 
 from data import WaterPredictDataSet, WaterTrainDataSet
-from loss import BCEFocalLoss, FocalLoss, ModifiedOhemLoss
+from loss import BCEFocalLoss, Combined_Bce_Dice_Loss, FocalLoss, ModifiedOhemLoss
 from utils import metrics, CutMix
 
 
@@ -69,6 +69,7 @@ class WaterDetection:
             self.model.train()
             indexes.refresh()
             loss_num = 0.
+            loss_list = [0., 0., 0., 0., 0.]
             with tqdm(total=n_train, desc=f'Epoch {epoch}/{self.epochs}:train',
                       unit='img') as pbar:
                 for batch in train_loader:
@@ -79,47 +80,59 @@ class WaterDetection:
                         device=self.device, dtype=torch.float32)
                     mask = batch['mask'].to(
                         device=self.device, dtype=torch.long)
+                    true_size = imag.shape[0]
+
                     
                     pred = self.model(imag)
 
-                    pred_label = torch.zeros_like(goal, dtype=int)
+                    pred_label = torch.zeros_like(goal, dtype=bool)
                     if isinstance(pred, list):
                         for i, item in enumerate(pred):
                             item = torch.sigmoid(item)
-                            pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                            pred[i] = item
+                            if resize:
+                                pred[i] = F.interpolate(item, 512, mode='bilinear')
+                                
                         keys = [10, 30, 40, 90]
-                        mask_all = torch.zeros_like(goal, dtype=int)
+                        mask_all = torch.zeros_like(goal, dtype=bool)
                         loss = 0.
                         for i, key in enumerate(keys):
                             mask_cls = mask == key
-                            mask_cls = mask_cls.unsqueeze(1)
-                            loss += criterion(pred[i], goal, mask_cls)
+                            loss_i = criterion(pred[i], goal, mask_cls).mean()
+                            loss += loss_i
+                            loss_list[i] += loss_i.item() * true_size
                             pred_label |= ((pred[i] >= 0.5) & mask_cls)
                             mask_all |= mask_cls
-                        mask_all.unsqueeze(1)
-                        loss += criterion(pred[4], goal, ~mask_all)
+                        mask_cls = mask == 80
+                        mask_all |= mask_cls
+                        loss_i = criterion(pred[4], goal, ~mask_all).mean()
+                        loss += loss_i
+                        loss_list[4] += loss_i.item() * true_size
+                        pred_label |= mask_cls
                         pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                     else:
                         pred = torch.sigmoid(pred)
-                        pred = F.interpolate(pred, scale_factor=2, mode='nearest')
+                        pred = F.interpolate(pred, 512, mode='bilinear')
                         pred_label = pred >= 0.5
                         loss = criterion(pred, goal)
                     loss.backward()
                     optimizer.step()
                     optimizer.zero_grad()
 
-                    true_size = imag.shape[0]
                     indexes.calCM_once(
-                        pred_label[mask_all > 0].cpu().numpy(), goal[mask_all > 0].cpu().numpy())
+                        pred_label.cpu().numpy(), goal.cpu().numpy())
                     loss_num += loss.item() * true_size
                     pbar.update(true_size)
             # lr_scheduler.step()
             loss_num /= n_train
+            for i in range(5):
+                loss_list[i] /= n_train
             indexes_num = indexes.update()
             f1_all = indexes_num['f1']
             loss_all = loss_num
             print(f'loss = {loss_num}, {indexes_num}')
             if epoch % 1 == 0:
+                print(f'loss: {loss_list}')
                 self.save_accuracy(epoch, loss_num, indexes_num, train_log_dir)
 
             if ds_valid is not None:
@@ -144,7 +157,9 @@ class WaterDetection:
                             if isinstance(pred, list):
                                 for i, item in enumerate(pred):
                                     item = torch.sigmoid(item)
-                                    pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                                    pred[i] = item
+                                    if resize:
+                                        pred[i] = F.interpolate(item, 512, mode='bilinear')
                                 keys = [10, 30, 40, 90]
                                 mask_all = torch.zeros_like(goal, dtype=int)
                                 loss = 0.
@@ -159,13 +174,13 @@ class WaterDetection:
                                 pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                             else:
                                 pred = torch.sigmoid(pred)
-                                pred = F.interpolate(pred, scale_factor=2, mode='nearest')
+                                pred = F.interpolate(pred, 512, mode='bilinear')
                                 pred_label = pred >= 0.5
                                 loss = criterion(pred, goal)
 
                             true_size = imag.shape[0]
                             indexes.calCM_once(
-                                pred_label[mask_all > 0].cpu().numpy(), goal[mask_all > 0].cpu().numpy())
+                                pred_label.cpu().numpy(), goal.cpu().numpy())
                             loss_num += loss.item() * true_size
                             pbar.update(true_size)
                 loss_num /= n_valid
@@ -269,27 +284,31 @@ class WaterDetection:
                         if isinstance(pred, list):
                             for i, item in enumerate(pred):
                                 item = torch.sigmoid(item)
-                                pred[i] = F.interpolate(item, scale_factor=2, mode='bilinear', antialias=True)
+                                if resize:
+                                    pred[i] = F.interpolate(item, 512, mode='bilinear', antialias=True)
                             keys = [10, 30, 40, 90]
-                            thres = [0.4, 0.4, 0.4, 0.4]
-                            mask_all = torch.zeros_like(pred[0], dtype=int)
-                            pred_label = torch.zeros_like(pred[0], dtype=int)
+                            thres = [0.5, 0.5, 0.5, 0.5]
+                            mask_all = torch.zeros_like(pred[0], dtype=bool)
+                            pred_label = torch.zeros_like(pred[0], dtype=bool)
                             for i, key in enumerate(keys):
                                 mask_cls = mask == key
-                                mask_cls = mask_cls.unsqueeze(1)
+                                # pred_label += ((pred[i]) * mask_cls)
                                 pred_label |= ((pred[i] >= thres[i]) & mask_cls)
                                 mask_all |= mask_cls
+                            # pred_label += ((pred[4]) * ~mask_all)
                             pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                         else:
                             pred = torch.sigmoid(pred)
                             if resize:
-                                pred = F.interpolate(pred, scale_factor=2, mode='bilinear')
+                                pred = F.interpolate(pred, 512, mode='bilinear')
                             pred_label = pred >= 0.5
                         mask_water = mask == 80
                         pred_label |= mask_water
 
                     for image_single, name_single in zip(pred_label, name):
                         image = image_single.cpu().numpy().astype(np.uint8).squeeze(0)
+                        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                        # image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
                         cv2.imwrite(f'{save_path}/{name_single}.png', image)
                         cv2.imwrite(
                             f'{save_view_path}/{name_single}.png', image * 255)

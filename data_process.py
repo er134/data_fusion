@@ -18,7 +18,7 @@ def npy_sar_class(image_path, compose:tf.Compose):
     sdwi = np.expand_dims(data[0, :, :] + data[1,:,:] + np.log(10), 0)
     data = np.concatenate((data, sdwi), axis=0)
     data = compose(torch.tensor(data, dtype=float))
-    mask = torch.tensor(image_data[4, :, :])
+    mask = torch.tensor(image_data[4, :, :]).unsqueeze(0)
     return data, mask
 
 def tif_sar_class(image_path, compose:tf.Compose):

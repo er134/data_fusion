@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .ConvNext import ConvNeXt
+
 ###############################################################################
 '''U-Net Structure'''
 
@@ -151,9 +153,46 @@ class MultiHead(nn.Module):
         return [y1, y2, y3, y4, y5]
 
 
+class UNet_ConvNext(nn.Module):
+    def __init__(self, n_channels, n_classes, dim=128, bilinear=True, multi_head=False):
+        super(UNet_ConvNext, self).__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+        self.multi_head = multi_head
+
+        self.encoder = ConvNeXt(in_chans=n_channels, depths=[3, 3, 27, 3], dims=[dim, dim*2, dim*4, dim*8])
+        factor = 2 if bilinear else 1
+        self.down = Down(dim * 8, (dim * 16) // factor)
+        self.up1 = Up(dim * 16, (dim * 8) // factor, bilinear)
+        self.up2 = Up(dim * 8, (dim * 4) // factor, bilinear)
+        self.up3 = Up(dim * 4, (dim * 2) // factor, bilinear)
+        self.up4 = Up(dim * 2, dim, bilinear)
+        self.outc = MultiHead(dim, n_classes) if multi_head \
+            else OutConv(dim, n_classes)
+
+    def forward(self, x):
+        x1, x2, x3, x4 = self.encoder(x)
+        x5 = self.down(x4)
+        y1 = self.up1(x5, x4)
+        y2 = self.up2(y1, x3)
+        y3 = self.up3(y2, x2)
+        y4 = self.up4(y3, x1)
+        logits = self.outc(y4)
+        if self.multi_head:
+            for i, item in enumerate(logits):
+                logits[i] = F.interpolate(item, x.size()[2:], mode='bilinear')
+        else:
+            logits = F.interpolate(logits, x.size()[2:], mode='bilinear', align_corners=True)
+        return logits
+
 ##############################################################################
 if __name__ == "__main__":
-    data = torch.rand((1,6,512,512),dtype=torch.float32)
-    model = UNet(6,2)
+    data = torch.rand((1, 3, 512, 512),dtype=torch.float32)
+    label = torch.rand((1, 1, 512, 512),dtype=torch.float32)
+    model = UNet_ConvNext(3, 1, multi_head=True)
     output = model(data)
-    print(output.shape)
+    criterion = nn.BCEWithLogitsLoss()
+    loss = criterion(output[0], label)
+    loss.backward()
+    print(loss)

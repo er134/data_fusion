@@ -51,7 +51,40 @@ class BCEFocalLoss(torch.nn.Module):
         elif self.reduction == 'sum':
             loss = torch.sum(loss)
         return loss
+
+class SoftDiceLoss(nn.Module):
+    def __init__(self, smooth=1., dims=(-2,-1)):
+
+        super(SoftDiceLoss, self).__init__()
+        self.smooth = smooth
+        self.dims = dims
     
+    def forward(self, x, y):
+        tp = (x * y).sum(self.dims)
+        fp = (x * (1 - y)).sum(self.dims)
+        fn = ((1 - x) * y).sum(self.dims)
+        
+        dc = (2 * tp + self.smooth) / (2 * tp + fp + fn + self.smooth)
+        dc = dc.mean()
+
+        return 1 - dc
+
+
+class Combined_Bce_Dice_Loss(nn.Module):
+    def __init__(self,dice_weight=torch.tensor(1.0).cuda(),bce_weight=torch.tensor(0.).cuda()):
+        super(Combined_Bce_Dice_Loss,self).__init__()
+        self.dice_w = dice_weight
+        self.bce_w = bce_weight
+        self.diceloss = SoftDiceLoss(0.)
+        self.bceloss = nn.BCELoss()#Balance_Loss(nepochs)
+    
+    def forward(self,pred, target, mask):
+        p = pred * mask
+        t = target * mask
+        bce = self.bceloss(p, t)
+        dice = self.diceloss(p, t)
+        return self.bce_w*bce + self.dice_w*dice
+
 class ModifiedOhemLoss(nn.Module): # only available for binary-classification
 
     def __init__(self, thresh=1.0, min_kept=256): # OHEM ≈ BCE when thresh = 1.0

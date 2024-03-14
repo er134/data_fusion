@@ -60,7 +60,8 @@ class SemiWaterDetection(WaterDetection):
                     if isinstance(pred, list):
                         for i, item in enumerate(pred):
                             item = torch.sigmoid(item)
-                            pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+                            if resize:
+                                pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
                         keys = [10, 30, 40, 90]
                         mask_all = torch.zeros_like(goal, dtype=int)
                         loss = 0.
@@ -97,71 +98,72 @@ class SemiWaterDetection(WaterDetection):
             if epoch % 1 == 0:
                 self.save_accuracy(epoch, loss_num, indexes_num, train_log_dir)
                 
-            if ds_valid is not None:
-                indexes.refresh()
-                loss_num = 0.
-                with torch.no_grad():
-                    self.model.eval()
-                    with tqdm(total=n_valid, desc=f'Epoch {epoch}/{self.epochs}:vaild',
-                              unit='img') as pbar:
-                        for batch in valid_loader:
+            # if ds_valid is not None:
+            #     indexes.refresh()
+            #     loss_num = 0.
+            #     with torch.no_grad():
+            #         self.model.eval()
+            #         with tqdm(total=n_valid, desc=f'Epoch {epoch}/{self.epochs}:vaild',
+            #                   unit='img') as pbar:
+            #             for batch in valid_loader:
 
-                            imag = batch['data'].to(
-                                device=self.device, dtype=torch.float32)
-                            goal = batch['label'].to(
-                                device=self.device, dtype=torch.float32)
-                            mask = batch['mask'].to(
-                                device=self.device, dtype=torch.long)
+            #                 imag = batch['data'].to(
+            #                     device=self.device, dtype=torch.float32)
+            #                 goal = batch['label'].to(
+            #                     device=self.device, dtype=torch.float32)
+            #                 mask = batch['mask'].to(
+            #                     device=self.device, dtype=torch.long)
 
-                            pred = self.model(imag)
+            #                 pred = self.model(imag)
 
-                            certain_mask = goal <= 1
-                            goal[goal>1] = 1
-                            pred_label = torch.zeros_like(goal, dtype=int)
-                            if isinstance(pred, list):
-                                for i, item in enumerate(pred):
-                                    item = torch.sigmoid(item)
-                                    pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
-                                keys = [10, 30, 40, 90]
-                                mask_all = torch.zeros_like(goal, dtype=int)
-                                loss = 0.
-                                for i, key in enumerate(keys):
-                                    mask_cls = mask == key
-                                    mask_cls = mask_cls.unsqueeze(1)
-                                    loss += (criterion(pred[i], goal, mask_cls) * certain_mask).mean()
-                                    pred_label |= ((pred[i] >= 0.5) & mask_cls)
-                                    mask_all |= mask_cls
-                                mask_all.unsqueeze(1)
-                                loss += (criterion(pred[4], goal, ~mask_all) * certain_mask).mean()
-                                pred_label |= ((pred[4] >= 0.5) & ~mask_all)
-                            else:
-                                pred = torch.sigmoid(pred)
-                                pred = F.interpolate(pred, scale_factor=2, mode='nearest')
-                                pred_label = pred >= 0.5
-                                loss = criterion(pred, goal)
+            #                 certain_mask = goal <= 1
+            #                 goal[goal>1] = 1
+            #                 pred_label = torch.zeros_like(goal, dtype=int)
+            #                 if isinstance(pred, list):
+            #                     for i, item in enumerate(pred):
+            #                         item = torch.sigmoid(item)
+            #                         pred[i] = F.interpolate(item, scale_factor=2, mode='nearest')
+            #                     keys = [10, 30, 40, 90]
+            #                     mask_all = torch.zeros_like(goal, dtype=int)
+            #                     loss = 0.
+            #                     for i, key in enumerate(keys):
+            #                         mask_cls = mask == key
+            #                         mask_cls = mask_cls.unsqueeze(1)
+            #                         loss += (criterion(pred[i], goal, mask_cls) * certain_mask).mean()
+            #                         pred_label |= ((pred[i] >= 0.5) & mask_cls)
+            #                         mask_all |= mask_cls
+            #                     mask_all.unsqueeze(1)
+            #                     loss += (criterion(pred[4], goal, ~mask_all) * certain_mask).mean()
+            #                     pred_label |= ((pred[4] >= 0.5) & ~mask_all)
+            #                 else:
+            #                     pred = torch.sigmoid(pred)
+            #                     pred = F.interpolate(pred, scale_factor=2, mode='nearest')
+            #                     pred_label = pred >= 0.5
+            #                     loss = criterion(pred, goal)
 
-                            true_size = imag.shape[0]
-                            indexes.calCM_once(
-                                pred_label.cpu().numpy(), goal.cpu().numpy())
-                            loss_num += loss.item() * true_size
-                            pbar.update(true_size)
-            loss_num /= n_valid
-            indexes_num = indexes.update()
-            f1 = indexes_num['f1']
-            f1_all = f1
-            print(f'loss = {loss_num}, {indexes_num}')
-            loss_all = (loss_all+loss_num)/2
+            #                 true_size = imag.shape[0]
+            #                 indexes.calCM_once(
+            #                     pred_label.cpu().numpy(), goal.cpu().numpy())
+            #                 loss_num += loss.item() * true_size
+            #                 pbar.update(true_size)
+            # loss_num /= n_valid
+            # indexes_num = indexes.update()
+            # f1 = indexes_num['f1']
+            # f1_all = f1
+            # print(f'loss = {loss_num}, {indexes_num}')
+            # loss_all = (loss_all+loss_num)/2
 
             wgt_dir = os.path.join(self.save_path, "model_epoch_")
 
-            if epoch % 50 == 2 and epoch <= 302:
+            if epoch % 50 == 1 and epoch <= 1:
                 self.semi_predict(dataset=ds_valid, resize=True, thres=0.9, save_path='./temp')
                 print('updated train dataloader')
                 ds_valid.labels = build_imglist('./temp')
-                self.model = UNet(3, 1, 64, multi_head=True)
-                self.model.load_state_dict(torch.load(f'{wgt_dir}{best_f1_epoch}_f1.pt'))
-                self.model.to(device=self.device)
-                self.model.outc = MultiHead(64, 1).to(device=self.device)
+                self.model = UNet(3, 1, 96, multi_head=True).to(device=self.device)
+                # self.model = UNet(3, 1, 64, multi_head=True)
+                # self.model.load_state_dict(torch.load(f'{wgt_dir}{best_loss_epoch}_f1.pt'))
+                # self.model.to(device=self.device)
+                # self.model.outc = MultiHead(64, 1).to(device=self.device)
                 train_loader = DataLoader(ds_train + ds_valid, batch_size=self.batchsize,
                                 shuffle=True, num_workers=self.num_workers, pin_memory=True)
                 optimizer = torch.optim.AdamW(
@@ -172,7 +174,7 @@ class SemiWaterDetection(WaterDetection):
             if epoch % 1 == 0:
                 self.save_accuracy(epoch, loss_num, indexes_num, valid_log_dir)
                 if loss_num < best_loss:
-                    best_loss = loss_num
+                    best_loss = loss_all
                     self.update_checkpoint(
                         f'{wgt_dir}{best_loss_epoch}_loss.pt', f'{wgt_dir}{epoch}_loss.pt')
                     best_loss_epoch = epoch
