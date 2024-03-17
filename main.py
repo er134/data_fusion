@@ -150,27 +150,35 @@ class WaterDetection:
                                 device=self.device, dtype=torch.float32)
                             mask = batch['mask'].to(
                                 device=self.device, dtype=torch.long)
+                            true_size = imag.shape[0]
 
+                            
                             pred = self.model(imag)
 
-                            pred_label = torch.zeros_like(goal, dtype=int)
+                            pred_label = torch.zeros_like(goal, dtype=bool)
                             if isinstance(pred, list):
                                 for i, item in enumerate(pred):
                                     item = torch.sigmoid(item)
                                     pred[i] = item
                                     if resize:
                                         pred[i] = F.interpolate(item, 512, mode='bilinear')
+                                        
                                 keys = [10, 30, 40, 90]
-                                mask_all = torch.zeros_like(goal, dtype=int)
+                                mask_all = torch.zeros_like(goal, dtype=bool)
                                 loss = 0.
                                 for i, key in enumerate(keys):
                                     mask_cls = mask == key
-                                    mask_cls = mask_cls.unsqueeze(1)
-                                    loss += criterion(pred[i], goal, mask_cls)
+                                    loss_i = criterion(pred[i], goal, mask_cls).mean()
+                                    loss += loss_i
+                                    loss_list[i] += loss_i.item() * true_size
                                     pred_label |= ((pred[i] >= 0.5) & mask_cls)
                                     mask_all |= mask_cls
-                                mask_all.unsqueeze(1)
-                                loss += criterion(pred[4], goal, ~mask_all)
+                                mask_cls = mask == 80
+                                mask_all |= mask_cls
+                                loss_i = criterion(pred[4], goal, ~mask_all).mean()
+                                loss += loss_i
+                                loss_list[4] += loss_i.item() * true_size
+                                pred_label |= mask_cls
                                 pred_label |= ((pred[4] >= 0.5) & ~mask_all)
                             else:
                                 pred = torch.sigmoid(pred)
@@ -178,7 +186,6 @@ class WaterDetection:
                                 pred_label = pred >= 0.5
                                 loss = criterion(pred, goal)
 
-                            true_size = imag.shape[0]
                             indexes.calCM_once(
                                 pred_label.cpu().numpy(), goal.cpu().numpy())
                             loss_num += loss.item() * true_size
@@ -205,6 +212,10 @@ class WaterDetection:
                     best_f1_epoch = epoch
                 self.update_checkpoint(
                     f'{wgt_dir}last.pt', f'{wgt_dir}last.pt', False)
+                    
+            if epoch % 100 == 1:
+                best_f1_epoch = epoch
+                best_loss_epoch = epoch
 
     def predict(self, data_process=None, batchsize=None, dataset=None, data_path=None, resize=False, TTA=True, save_path=None):
         if data_path is None:
@@ -286,6 +297,8 @@ class WaterDetection:
                                 item = torch.sigmoid(item)
                                 if resize:
                                     pred[i] = F.interpolate(item, 512, mode='bilinear', antialias=True)
+                                else:
+                                    pred[i] = item
                             keys = [10, 30, 40, 90]
                             thres = [0.5, 0.5, 0.5, 0.5]
                             mask_all = torch.zeros_like(pred[0], dtype=bool)

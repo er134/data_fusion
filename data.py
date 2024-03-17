@@ -77,19 +77,19 @@ class WaterBaseDataSet(torch.utils.data.Dataset):
                 label = F.vflip(label)
                 mask = F.vflip(mask)
             if torch.rand(1) < p4:
-                shape_crop = shape // np.random.randint(2, 5) 
-                i, j, h, w = tf.RandomCrop.get_params(data, (shape_crop, shape_crop))
-                data = F.crop(data, i, j, h, w)
-                label = F.crop(label, i, j, h, w)
-                data = F.resize(data, shape, antialias=True)
-                label = F.resize(label, shape, antialias=True)
+                i, j, h, w = tf.RandomCrop.get_params(data, (256, 256))
+                data = F.crop(data, i, j, 256, 256)
+                label = F.crop(label, i, j, 256, 256)
+                mask = F.crop(mask, i, j, 256, 256)
             if torch.rand(1) < p3:
                 x, y, h, w, v = tf.RandomErasing.get_params(data, scale=(0.02, 0.33), ratio=(0.3, 3.3))
                 data = F.erase(data, x, y, h ,w, v)
                 label = F.erase(label, x, y, h ,w, torch.tensor(0.))
         if self.resize:
-            _, h, w = data.shape
+            _, h, w = (2, 512, 512)#data.shape
             data = F.resize(data, (h//2, w//2), antialias=True)
+            # label = F.resize(label, (h//2, w//2), antialias=True) 
+            # mask = F.resize(mask, (h//2, w//2), antialias=True)
         if self.cut:
             _, h, w = data.shape
             match range:
